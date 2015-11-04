@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:hz="http://www.hazelcast.com/schema/spring"
+       xmlns="http://www.springframework.org/schema/beans"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.hazelcast.com/schema/spring
+       http://www.hazelcast.com/schema/spring/hazelcast-spring.xsd">
+
+    <!-- For configuring cluster backend -->
+    <hz:hazelcast id="clusterBackend">
+        <hz:config>
+            <hz:network port="5701" port-auto-increment="true">
+                <hz:join>
+                    <hz:multicast enabled="true"/>
+                    <!--<hz:tcp-ip enabled="true">-->
+                        <!--<hz:member>localhost:5701</hz:member>-->
+                    <!--</hz:tcp-ip>-->
+                </hz:join>
+            </hz:network>
+        </hz:config>
+    </hz:hazelcast>
+</beans>
