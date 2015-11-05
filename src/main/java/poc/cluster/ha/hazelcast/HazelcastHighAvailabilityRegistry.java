@@ -170,7 +170,7 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
      */
     private void onMemberDown(Member goneMember, Set<Member> clusterMembers) {
         HazelcastClusterMember member = new HazelcastClusterMember(goneMember);
-        logger.debug("[HA] Node " + member.getId() + " is down");
+        logger.debug("[HA] " + member + " is down");
         if (getClusterMaster(convert(clusterMembers)).equals(getLocalMember())) { // we are master, update cluster metadata
             for (String feature : membershipRegistry.keySet()) {
                 membershipRegistry.lock(feature);
