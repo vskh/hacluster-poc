@@ -1,5 +1,6 @@
 package poc.cluster.ha.hazelcast;
 
+import com.hazelcast.config.MapConfig;
 import com.hazelcast.core.*;
 import com.hazelcast.map.listener.EntryAddedListener;
 import com.hazelcast.map.listener.EntryMergedListener;
@@ -26,12 +27,12 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
     private static final Logger logger = LoggerFactory.getLogger(HazelcastHighAvailabilityRegistry.class);
 
     private static final String MEMBERSHIP_REGISTRY_ID = HazelcastHighAvailabilityRegistry.class.getCanonicalName() + ".subscriptions";
-    private static final String MASTERS_REGISTRY_ID = HazelcastHighAvailabilityRegistry.class.getCanonicalName() + ".masters";
+    private static final String FEATURE_MASTER_KEY = "FEATUREMASTER011235813";
 
     private HazelcastInstance hzInstance;
     private IMap<String, Map<String, HazelcastClusterMember>> membershipRegistry;
-    private IMap<String, String> mastersRegistry;
-    private Map<String, FeatureSubscription> featureListeners = new ConcurrentHashMap<>();
+    private Map<String, FeatureAvailabilityListener<String, HazelcastClusterMember>> featureListeners =
+            new ConcurrentHashMap<String, FeatureAvailabilityListener<String, HazelcastClusterMember>>();
     private MasterElector<HazelcastClusterMember> masterElector = new SmallestUuidMasterElector();
 
     private HazelcastClusterMember localMember = null;
@@ -40,8 +41,7 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
     public HazelcastHighAvailabilityRegistry(HazelcastInstance hzInstance) {
         this.hzInstance = hzInstance;
         membershipRegistry = hzInstance.getMap(MEMBERSHIP_REGISTRY_ID);
-        mastersRegistry = hzInstance.getMap(MASTERS_REGISTRY_ID);
-
+        MapConfig mc;
         hzInstance.getCluster().addMembershipListener(new FailoverListener()); // tracking nodes going down
         membershipRegistry.addEntryListener(new FeatureMembershipListener(), true); // tracking subscriptions to features
 
@@ -75,13 +75,16 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
 
     @Override
     public Collection<HazelcastClusterMember> getMembersOf(String feature) {
-        membershipRegistry.lock(feature);
-        Map<String, HazelcastClusterMember> members = membershipRegistry.get(feature);
-        membershipRegistry.unlock(feature);
+        try {
+            membershipRegistry.lock(feature);
+            Map<String, HazelcastClusterMember> members = membershipRegistry.get(feature);
 
-        return members == null ?
-                Collections.<HazelcastClusterMember>emptyList() :
-                Collections.unmodifiableCollection(members.values());
+            return members == null ?
+                    Collections.<HazelcastClusterMember>emptyList() :
+                    Collections.unmodifiableCollection(members.values());
+        } finally {
+            membershipRegistry.unlock(feature);
+        }
     }
 
     @Override
@@ -91,62 +94,56 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
 
     @Override
     public HazelcastClusterMember getMasterMemberOf(String feature) {
-        membershipRegistry.lock(feature);
-        mastersRegistry.lock(feature);
-        String masterId = mastersRegistry.get(feature);
-        HazelcastClusterMember member = membershipRegistry.get(feature).get(masterId);
-        mastersRegistry.unlock(feature);
-        membershipRegistry.unlock(feature);
-
-        return member;
+        try {
+            membershipRegistry.lock(feature);
+            HazelcastClusterMember member = membershipRegistry.get(feature).get(FEATURE_MASTER_KEY);
+            return member;
+        } finally {
+            membershipRegistry.unlock(feature);
+        }
     }
 
     @Override
     public void joinFeatureCluster(String feature,
                                    FeatureAvailabilityListener<String, HazelcastClusterMember> listener) {
-        membershipRegistry.lock(feature);
+        try {
+            membershipRegistry.lock(feature);
 
-        if (featureListeners.containsKey(feature)) {
-            throw new IllegalStateException("Already part of feature '" + feature + "' cluster");
+            if (featureListeners.containsKey(feature)) {
+                throw new IllegalStateException("Already part of feature '" + feature + "' cluster");
+            }
+
+            ensureFeatureMembership(feature, listener);
+        } finally {
+            membershipRegistry.unlock(feature);
         }
 
-        Map<String, HazelcastClusterMember> featureMembers = membershipRegistry.get(feature);
-        if (featureMembers == null) {
-            featureMembers = new TreeMap<String, HazelcastClusterMember>();
-        }
-
-        HazelcastClusterMember localMember = getLocalMember();
-        featureMembers.put(localMember.getId(), localMember);
-
-        membershipRegistry.put(feature, featureMembers);
-
-        String masterChangeListenerId = mastersRegistry.addEntryListener(new MasterChangeListener(), feature, true);
-        featureListeners.put(feature, new FeatureSubscription(listener, masterChangeListenerId));
-
-        membershipRegistry.unlock(feature);
+        logger.info("[HA] " + localMember + " has joined '" + feature + "' cluster");
     }
 
     @Override
     public void leaveFeatureCluster(String feature) {
-        membershipRegistry.lock(feature);
+        try {
+            membershipRegistry.lock(feature);
 
-        FeatureSubscription featureSubscription = featureListeners.get(feature);
-        if (featureSubscription == null) {
-            throw new IllegalStateException("Not part of feature '" + feature + "' cluster");
+            FeatureAvailabilityListener featureAvailabilityListener = featureListeners.get(feature);
+            if (featureAvailabilityListener == null) {
+                throw new IllegalStateException("Not part of feature '" + feature + "' cluster");
+            }
+
+            Map<String, HazelcastClusterMember> featureMembers = membershipRegistry.get(feature);
+            if (featureMembers == null) {
+                logger.warn("[HA] Feature is missing from registry but present on local node");
+            } else {
+                HazelcastClusterMember localMember = getLocalMember();
+                featureMembers.remove(localMember.getId());
+                membershipRegistry.put(feature, featureMembers);
+                logger.info("[HA] " + localMember + " has left '" + feature + "' cluster");
+            }
+            featureListeners.remove(feature);
+        } finally {
+            membershipRegistry.unlock(feature);
         }
-
-        Map<String, HazelcastClusterMember> featureMembers = membershipRegistry.get(feature);
-        if (featureMembers == null) {
-            logger.warn("[HA] Feature is missing from registry but present on local node");
-        } else {
-            featureMembers.remove(getLocalMember().getId());
-            membershipRegistry.put(feature, featureMembers);
-        }
-
-        mastersRegistry.removeEntryListener(featureSubscription.masterChangeListenerId);
-        featureListeners.remove(feature);
-
-        membershipRegistry.unlock(feature);
     }
 
     private HazelcastClusterMember getClusterMaster(Collection<HazelcastClusterMember> members) {
@@ -162,35 +159,46 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
         return members;
     }
 
+    private Map<String, HazelcastClusterMember> cleanupMembers(Map<String, HazelcastClusterMember> members) {
+        Set<String> clusterMemberIds = new HashSet<String>();
+        for (HazelcastClusterMember m : getClusterMembers()) {
+            clusterMemberIds.add(m.getId());
+        }
+        Set<String> cleanedMemberIds = members.keySet();
+        int preCleanSize = cleanedMemberIds.size();
+        cleanedMemberIds.retainAll(clusterMemberIds);
+        int postCleanSize = cleanedMemberIds.size();
+
+        logger.debug("[HA] " + (preCleanSize - postCleanSize) + " members cleaned");
+
+        return members;
+    }
+
     /**
      * Handles case when cluster node goes down.
      *
      * @param goneMember     cluster member that went down.
      * @param clusterMembers new list of cluster members.
      */
-    private void onMemberDown(Member goneMember, Set<Member> clusterMembers) {
+    private void onMemberDown(Member goneMember, Collection<HazelcastClusterMember> clusterMembers) {
         HazelcastClusterMember member = new HazelcastClusterMember(goneMember);
         logger.debug("[HA] " + member + " is down");
-        if (getClusterMaster(convert(clusterMembers)).equals(getLocalMember())) { // we are master, update cluster metadata
+        if (getClusterMaster(clusterMembers).equals(getLocalMember())) { // we are master, update cluster metadata
             for (String feature : membershipRegistry.keySet()) {
-                membershipRegistry.lock(feature);
+                try {
+                    membershipRegistry.lock(feature);
 
-                Map<String, HazelcastClusterMember> members = membershipRegistry.get(feature);
+                    Map<String, HazelcastClusterMember> members = membershipRegistry.get(feature);
 
-                if (members.containsKey(member.getId())) {
-                    members.remove(member.getId());
-                    membershipRegistry.put(feature, members);
+                    if (members.containsKey(member.getId())) {
+                        logger.trace("Removing " + member + " from '" + feature + "' cluster");
+                        members.remove(member.getId());
 
-                    mastersRegistry.lock(feature);
-                    if (member.getId().equals(mastersRegistry.get(feature))) {
-                        String newMasterId = masterElector.elect(members.values()).getId();
-                        mastersRegistry.put(feature, newMasterId);
-                        logger.info("[HA-Master] Master of '" + feature + "' cluster is down. Re-elected master is " + newMasterId);
+                        membershipRegistry.put(feature, members);
                     }
-                    mastersRegistry.unlock(feature);
+                } finally {
+                    membershipRegistry.unlock(feature);
                 }
-
-                membershipRegistry.unlock(feature);
             }
         }
     }
@@ -201,16 +209,27 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
      * @param feature feature identifier
      * @param members (member id -> member) map of nodes that provide high availability of given feature
      */
-    private void onFeatureUpdate(String feature, Map<String, HazelcastClusterMember> members) {
-        logger.debug("[HA] Feature '" + feature + "' membership updated");
+    private void onFeatureUpdate(String feature,
+                                 HazelcastClusterMember oldMaster,
+                                 HazelcastClusterMember newMaster,
+                                 Map<String, HazelcastClusterMember> members) {
+        logger.debug("[HA] '" + feature + "' cluster updated");
         if (getClusterMaster().equals(getLocalMember())) {
-            mastersRegistry.lock(feature);
-            String newMasterId = masterElector.elect(members.values()).getId();
-            if (!newMasterId.equals(mastersRegistry.get(feature))) {
-                mastersRegistry.put(feature, newMasterId);
-                logger.info("[HA-Master] New node has joined '" + feature + "' cluster. Re-elected master is " + newMasterId);
+            try {
+                membershipRegistry.lock(feature);
+                newMaster = masterElector.elect(cleanupMembers(members).values()); // on clusters merge there might be bogus members that need to be cleaned up
+                members.put(FEATURE_MASTER_KEY, newMaster);
+                if (!newMaster.equals(oldMaster)) {
+                    membershipRegistry.put(feature, members); // mind (almost) recursive call
+                    logger.info("[HA-Master] Re-elected '" + feature + "' cluster master is " + newMaster.getId());
+                }
+            } finally {
+                membershipRegistry.unlock(feature);
             }
-            mastersRegistry.unlock(feature);
+        }
+
+        if (!newMaster.equals(oldMaster)) {
+            onFeatureMasterSwitch(feature, oldMaster, newMaster);
         }
     }
 
@@ -218,34 +237,46 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
      * Handles fail over/fail back of master for particular feature.
      *
      * @param feature   feature id
-     * @param oldMaster previous master uuid (can be null if this is new feature in registry with single node yet)
-     * @param newMaster new master uuid
+     * @param oldMaster previous master (can be null if this is new feature in registry with single node yet)
+     * @param newMaster new master
      */
-    private void onFeatureMasterSwitch(String feature, String oldMaster, String newMaster) {
-        membershipRegistry.lock(feature);
-        Map<String, HazelcastClusterMember> members = membershipRegistry.get(feature);
-        String selfId = getLocalMember().getId();
+    private void onFeatureMasterSwitch(String feature, HazelcastClusterMember oldMaster, HazelcastClusterMember newMaster) {
+        HazelcastClusterMember self = getLocalMember();
 
-        if (selfId.equals(oldMaster) || selfId.equals(newMaster)) {
-            logger.info("[HA] Feature '" + feature + "' switch-over");
+        if (self.equals(oldMaster) || self.equals(newMaster)) {
+            logger.info("[HA] '" + feature + "' cluster switch-over");
 
             FeatureAvailabilityListener<String, HazelcastClusterMember> featureListener =
                     featureListeners
-                            .get(feature)
-                            .featureListener;
+                            .get(feature);
 
-            if (selfId.equals(oldMaster)) {
+            if (self.equals(oldMaster)) {
                 featureListener.onMasterRoleUnassigned(feature);
-            } else if (selfId.equals(newMaster)) {
+            } else if (self.equals(newMaster)) {
                 featureListener.onMasterRoleAssigned(feature);
             }
 
-            featureListener.onMasterChange(feature,
-                    getLocalMember(),
-                    oldMaster == null ? null : members.get(oldMaster),
-                    newMaster == null ? null : members.get(newMaster));
+            featureListener.onMasterChange(feature, self, oldMaster, newMaster);
         }
-        membershipRegistry.unlock(feature);
+    }
+
+    private void ensureFeatureMembership(String feature, FeatureAvailabilityListener<String, HazelcastClusterMember> listener) {
+        try {
+            membershipRegistry.lock(feature);
+            HazelcastClusterMember localMember = getLocalMember();
+
+            Map<String, HazelcastClusterMember> featureMembers = membershipRegistry.get(feature);
+            if (featureMembers == null) {
+                featureMembers = new TreeMap<String, HazelcastClusterMember>();
+                featureMembers.put(FEATURE_MASTER_KEY, localMember); // initialize master to node that creates it
+            }
+
+            featureMembers.put(localMember.getId(), localMember);
+            membershipRegistry.put(feature, featureMembers);
+            featureListeners.put(feature, listener);
+        } finally {
+            membershipRegistry.unlock(feature);
+        }
     }
 
     /**
@@ -255,15 +286,20 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
 
         @Override
         public void init(InitialMembershipEvent event) {
+            logger.trace("[HA] Init handler");
             logger.info("[HA] Registry failover listener initialized");
         }
 
         @Override
-        public void memberAdded(MembershipEvent membershipEvent) { /* not used */ }
+        public void memberAdded(MembershipEvent membershipEvent) {
+            logger.trace("[HA] Member added handler");
+            logger.debug("[HA] " + new HazelcastClusterMember(membershipEvent.getMember()) + " (re)joined");
+        }
 
         @Override
         public void memberRemoved(MembershipEvent membershipEvent) {
-            onMemberDown(membershipEvent.getMember(), membershipEvent.getMembers());
+            logger.trace("[HA] Member removed handler");
+            onMemberDown(membershipEvent.getMember(), convert(membershipEvent.getMembers()));
         }
 
         @Override
@@ -279,56 +315,40 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
 
         @Override
         public void entryAdded(EntryEvent<String, Map<String, HazelcastClusterMember>> event) {
-            onFeatureUpdate(event.getKey(), event.getValue());
+            logger.trace("[HA] Entry added handler");
+            Map<String, HazelcastClusterMember> members = event.getValue();
+            HazelcastClusterMember master = members.remove(FEATURE_MASTER_KEY);
+            onFeatureUpdate(event.getKey(), null, master, members);
+        }
+
+        public void handleUpdate(String feature,
+                                 Map<String, HazelcastClusterMember> oldMembers,
+                                 Map<String, HazelcastClusterMember> newMembers) {
+            HazelcastClusterMember oldMaster = oldMembers.get(FEATURE_MASTER_KEY);
+            HazelcastClusterMember newMaster = newMembers.remove(FEATURE_MASTER_KEY);
+            onFeatureUpdate(feature, oldMaster, newMaster, newMembers);
         }
 
         @Override
         public void entryUpdated(EntryEvent<String, Map<String, HazelcastClusterMember>> event) {
-            onFeatureUpdate(event.getKey(), event.getValue());
+            logger.trace("[HA] Entry updated handler");
+            if (event.getOldValue() != null) {
+                // Hack: fire processing only if actual put/replace operation was done on key
+                //       Can be used to avoid circular call to listener when source map is updated from within listener
+                //       method.
+                //       IMap.set() is used instead of IMap.put() to update value while not returning old value.
+                handleUpdate(event.getKey(), event.getOldValue(), event.getValue());
+            }
         }
 
         @Override
         public void entryMerged(EntryEvent<String, Map<String, HazelcastClusterMember>> event) {
-            onFeatureUpdate(event.getKey(), event.getValue());
+            logger.trace("[HA] Entry merged handler");
+            for (Map.Entry<String, FeatureAvailabilityListener<String, HazelcastClusterMember>> e : featureListeners.entrySet()) {
+                ensureFeatureMembership(e.getKey(), e.getValue());
+            }
+            handleUpdate(event.getKey(), event.getMergingValue(), event.getValue());
         }
-    }
-
-    /**
-     * Listens to MASTERS_REGISTRY_ID map.
-     */
-    private class MasterChangeListener implements EntryAddedListener<String, String>,
-            EntryUpdatedListener<String, String>,
-            EntryMergedListener<String, String> {
-
-        @Override
-        public void entryAdded(EntryEvent<String, String> event) {
-            onFeatureMasterSwitch(event.getKey(), event.getOldValue(), event.getValue());
-        }
-
-        @Override
-        public void entryUpdated(EntryEvent<String, String> event) {
-            onFeatureMasterSwitch(event.getKey(), event.getOldValue(), event.getValue());
-        }
-
-        @Override
-        public void entryMerged(EntryEvent<String, String> event) {
-            onFeatureMasterSwitch(event.getKey(), event.getOldValue(), event.getValue());
-        }
-    }
-
-    /**
-     * Handy holder.
-     */
-    private static class FeatureSubscription {
-        public FeatureSubscription(FeatureAvailabilityListener<String, HazelcastClusterMember> featureListener,
-                                   String masterChangeListenerId) {
-
-            this.featureListener = featureListener;
-            this.masterChangeListenerId = masterChangeListenerId;
-        }
-
-        FeatureAvailabilityListener<String, HazelcastClusterMember> featureListener;
-        String masterChangeListenerId;
     }
 
     /**

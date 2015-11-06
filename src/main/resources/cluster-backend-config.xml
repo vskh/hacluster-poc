@@ -10,6 +10,9 @@
     <!-- For configuring cluster backend -->
     <hz:hazelcast id="clusterBackend">
         <hz:config>
+            <hz:properties>
+                <hz:property name="hazelcast.max.no.heartbeat.seconds">10</hz:property>
+            </hz:properties>
             <hz:network port="5701" port-auto-increment="true">
                 <hz:join>
                     <hz:multicast enabled="true"/>
