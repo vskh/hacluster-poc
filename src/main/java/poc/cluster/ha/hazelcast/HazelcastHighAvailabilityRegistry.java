@@ -216,21 +216,29 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
                                  HazelcastClusterMember newMaster,
                                  Map<String, HazelcastClusterMember> members) {
         logger.debug("[HA] '" + feature + "' cluster updated");
+        if (members.size() == 0) {
+            logger.warn("[HA] '" + feature + "' cluster lost last supporting member");
+        }
         if (getClusterMaster().equals(getLocalMember())) {
             try {
                 membershipRegistry.lock(feature);
                 newMaster = masterElector.elect(members.values());
                 members.put(FEATURE_MASTER_KEY, newMaster);
-                if (!newMaster.equals(oldMaster)) {
-                    membershipRegistry.put(feature, members); // mind (almost) recursive call
-                    logger.info("[HA-Master] Re-elected '" + feature + "' cluster master is " + newMaster.getId());
+                if (newMaster != null) {
+                    if (!newMaster.equals(oldMaster)) {
+                        membershipRegistry.put(feature, members); // mind (almost) recursive call
+                        logger.info("[HA-Master] Re-elected '" + feature + "' cluster master is " + newMaster.getId());
+                    }
+                } else {
+                    membershipRegistry.remove(feature);
+                    logger.warn("[HA-Master] '" + feature + "' cluster was shut down due to master election failure");
                 }
             } finally {
                 membershipRegistry.unlock(feature);
             }
         }
 
-        if (!newMaster.equals(oldMaster)) {
+        if (newMaster != null && !newMaster.equals(oldMaster)) {
             onFeatureMasterSwitch(feature, oldMaster, newMaster);
         }
     }
@@ -252,13 +260,15 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
                     featureListeners
                             .get(feature);
 
-            if (self.equals(oldMaster)) {
-                featureListener.onMasterRoleUnassigned(feature);
-            } else if (self.equals(newMaster)) {
-                featureListener.onMasterRoleAssigned(feature);
-            }
+            if (featureListener != null) { // react on feature switch only if our node was interested in it
+                if (self.equals(oldMaster)) {
+                    featureListener.onMasterRoleUnassigned(feature);
+                } else if (self.equals(newMaster)) {
+                    featureListener.onMasterRoleAssigned(feature);
+                }
 
-            featureListener.onMasterChange(feature, self, oldMaster, newMaster);
+                featureListener.onMasterChange(feature, self, oldMaster, newMaster);
+            }
         }
     }
 
@@ -368,7 +378,7 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
             });
             membersOrderedByUuid.addAll(members);
 
-            return membersOrderedByUuid.first();
+            return membersOrderedByUuid.size() > 0 ? membersOrderedByUuid.first() : null;
         }
     }
 }
