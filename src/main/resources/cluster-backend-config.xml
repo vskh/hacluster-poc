@@ -15,10 +15,15 @@
             </hz:properties>
             <hz:network port="5701" port-auto-increment="true">
                 <hz:join>
-                    <hz:multicast enabled="true"/>
-                    <!--<hz:tcp-ip enabled="true">-->
-                        <!--<hz:member>localhost:5701</hz:member>-->
-                    <!--</hz:tcp-ip>-->
+                    <hz:multicast enabled="false"/>
+                    <hz:tcp-ip enabled="true">
+                        <hz:member>localhost:5701</hz:member>
+                        <hz:member>localhost:5702</hz:member>
+                        <hz:member>localhost:5703</hz:member>
+                        <hz:member>localhost:5704</hz:member>
+                        <hz:member>localhost:5705</hz:member>
+                        <hz:member>localhost:5706</hz:member>
+                    </hz:tcp-ip>
                 </hz:join>
             </hz:network>
         </hz:config>

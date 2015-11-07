@@ -200,6 +200,8 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
                     membershipRegistry.unlock(feature);
                 }
             }
+        } else {
+            logger.trace("[HA] Master = " + getClusterMaster() + ", local = " + getLocalMember());
         }
     }
 
@@ -217,7 +219,7 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
         if (getClusterMaster().equals(getLocalMember())) {
             try {
                 membershipRegistry.lock(feature);
-                newMaster = masterElector.elect(cleanupMembers(members).values()); // on clusters merge there might be bogus members that need to be cleaned up
+                newMaster = masterElector.elect(members.values());
                 members.put(FEATURE_MASTER_KEY, newMaster);
                 if (!newMaster.equals(oldMaster)) {
                     membershipRegistry.put(feature, members); // mind (almost) recursive call

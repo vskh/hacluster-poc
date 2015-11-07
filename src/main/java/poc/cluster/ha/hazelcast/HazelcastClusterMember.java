@@ -15,7 +15,8 @@ public class HazelcastClusterMember implements ClusterMember<String>, Serializab
     private String uuid;
 
     public HazelcastClusterMember(Member member) {
-        this.uuid = member.getUuid();
+        this.uuid = member.getSocketAddress().toString(); // addresses are used instead of uuids as they might change on
+                                                          // clusters merge after split-brain.
     }
 
     @Override
