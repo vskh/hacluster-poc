@@ -16,11 +16,11 @@ public interface FeatureAvailabilityListener<Feature, Member> {
     void onMasterRoleAssigned(Feature feature);
 
     /**
-     *
-     * @param feature
-     * @param self
-     * @param oldMaster
-     * @param newMaster
+     * Happends when feature cluster master changes.
+     * @param feature   feature being updated
+     * @param self      this node
+     * @param oldMaster previous master
+     * @param newMaster new master
      */
     void onMasterChange(Feature feature, Member self, Member oldMaster, Member newMaster);
     /**
