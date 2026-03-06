@@ -13,12 +13,11 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <slf4j.version>1.7.10</slf4j.version>
-        <log4j.version>2.1</log4j.version>
-        <spring.version>4.1.6.RELEASE</spring.version>
-        <spring-integration.version>4.1.5.RELEASE</spring-integration.version>
-        <hazelcast.version>3.5.3</hazelcast.version>
-        <junit.version>4.12</junit.version>
+        <slf4j.version>2.0.16</slf4j.version>
+        <log4j.version>2.24.3</log4j.version>
+        <spring.version>5.3.39</spring.version>
+        <hazelcast.version>5.3.8</hazelcast.version>
+        <junit.version>4.13.2</junit.version>
     </properties>
 
     <dependencies>
@@ -46,7 +45,7 @@
         </dependency>
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j-impl</artifactId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
             <version>${log4j.version}</version>
         </dependency>
         <!-- Spring -->
@@ -86,8 +85,8 @@
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
-                    <source>1.7</source>
-                    <target>1.7</target>
+                    <source>11</source>
+                    <target>11</target>
                 </configuration>
             </plugin>
         </plugins>

@@ -1,6 +1,6 @@
 package poc.cluster.ha.hazelcast;
 
-import com.hazelcast.core.Member;
+import com.hazelcast.cluster.Member;
 import poc.cluster.ha.ClusterMember;
 
 import java.io.Serializable;
@@ -16,7 +16,7 @@ public class HazelcastClusterMember implements ClusterMember<String>, Serializab
     private transient Member nativeMember;
 
     public HazelcastClusterMember(Member member) {
-        this.uuid = member.getSocketAddress().toString(); // addresses are used instead of uuids as they might change on
+        this.uuid = member.getAddress().toString(); // addresses are used instead of uuids as they might change on
                                                           // clusters merge after split-brain.
         this.nativeMember = member;
     }
@@ -28,15 +28,14 @@ public class HazelcastClusterMember implements ClusterMember<String>, Serializab
 
     @Override
     public String getAttribute(String attrName) {
-        return nativeMember.getStringAttribute(attrName);
+        return (String) nativeMember.getAttribute(attrName);
     }
 
     @Override
     public void setAttribute(String attrName, String attrValue) {
-        if (nativeMember == null) {
-            throw new IllegalStateException("Setting attributes of non-local cluster members is not supported");
-        }
-        nativeMember.setStringAttribute(attrName, attrValue);
+        // In Hazelcast 5.x, member attributes are immutable at runtime
+        // and can only be set via configuration before starting the member.
+        throw new UnsupportedOperationException("Setting member attributes at runtime is not supported in Hazelcast 5.x. Use member configuration instead.");
     }
 
     @Override

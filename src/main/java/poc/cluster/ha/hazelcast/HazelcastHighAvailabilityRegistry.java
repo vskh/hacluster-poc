@@ -1,7 +1,12 @@
 package poc.cluster.ha.hazelcast;
 
-import com.hazelcast.config.MapConfig;
-import com.hazelcast.core.*;
+import com.hazelcast.cluster.InitialMembershipEvent;
+import com.hazelcast.cluster.InitialMembershipListener;
+import com.hazelcast.cluster.Member;
+import com.hazelcast.cluster.MembershipEvent;
+import com.hazelcast.core.EntryEvent;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
 import com.hazelcast.map.listener.EntryAddedListener;
 import com.hazelcast.map.listener.EntryMergedListener;
 import com.hazelcast.map.listener.EntryUpdatedListener;
@@ -41,7 +46,6 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
     public HazelcastHighAvailabilityRegistry(HazelcastInstance hzInstance) {
         this.hzInstance = hzInstance;
         membershipRegistry = hzInstance.getMap(MEMBERSHIP_REGISTRY_ID);
-        MapConfig mc;
         hzInstance.getCluster().addMembershipListener(new FailoverListener()); // tracking nodes going down
         membershipRegistry.addEntryListener(new FeatureMembershipListener(), true); // tracking subscriptions to features
 
@@ -313,9 +317,6 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
             logger.trace("[HA] Member removed handler");
             onMemberDown(membershipEvent.getMember(), convert(membershipEvent.getMembers()));
         }
-
-        @Override
-        public void memberAttributeChanged(MemberAttributeEvent memberAttributeEvent) { /* not used */ }
     }
 
     /**
