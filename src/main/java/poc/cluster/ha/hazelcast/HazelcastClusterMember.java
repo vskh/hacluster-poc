@@ -28,7 +28,8 @@ public class HazelcastClusterMember implements ClusterMember<String>, Serializab
 
     @Override
     public String getAttribute(String attrName) {
-        return (String) nativeMember.getAttribute(attrName);
+        Object value = nativeMember.getAttribute(attrName);
+        return value != null ? value.toString() : null;
     }
 
     @Override
