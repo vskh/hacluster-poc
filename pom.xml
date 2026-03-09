@@ -14,8 +14,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <slf4j.version>2.0.16</slf4j.version>
-        <log4j.version>2.24.3</log4j.version>
-        <spring.version>5.3.39</spring.version>
+        <log4j.version>2.25.3</log4j.version>
+        <spring.version>6.1.20</spring.version>
         <hazelcast.version>5.3.8</hazelcast.version>
         <junit.version>4.13.2</junit.version>
     </properties>
