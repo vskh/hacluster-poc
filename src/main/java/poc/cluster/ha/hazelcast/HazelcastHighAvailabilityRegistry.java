@@ -1,7 +1,12 @@
 package poc.cluster.ha.hazelcast;
 
-import com.hazelcast.config.MapConfig;
-import com.hazelcast.core.*;
+import com.hazelcast.cluster.InitialMembershipEvent;
+import com.hazelcast.cluster.InitialMembershipListener;
+import com.hazelcast.cluster.Member;
+import com.hazelcast.cluster.MembershipEvent;
+import com.hazelcast.core.EntryEvent;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
 import com.hazelcast.map.listener.EntryAddedListener;
 import com.hazelcast.map.listener.EntryMergedListener;
 import com.hazelcast.map.listener.EntryUpdatedListener;
@@ -33,7 +38,7 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
     private IMap<String, Map<String, HazelcastClusterMember>> membershipRegistry;
     private Map<String, FeatureAvailabilityListener<String, HazelcastClusterMember>> featureListeners =
             new ConcurrentHashMap<String, FeatureAvailabilityListener<String, HazelcastClusterMember>>();
-    private MasterElector<HazelcastClusterMember> masterElector = new SmallestUuidMasterElector();
+    private MasterElector<HazelcastClusterMember> masterElector = new SmallestIdMasterElector();
 
     private HazelcastClusterMember localMember = null;
 
@@ -41,7 +46,6 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
     public HazelcastHighAvailabilityRegistry(HazelcastInstance hzInstance) {
         this.hzInstance = hzInstance;
         membershipRegistry = hzInstance.getMap(MEMBERSHIP_REGISTRY_ID);
-        MapConfig mc;
         hzInstance.getCluster().addMembershipListener(new FailoverListener()); // tracking nodes going down
         membershipRegistry.addEntryListener(new FeatureMembershipListener(), true); // tracking subscriptions to features
 
@@ -50,7 +54,7 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
 
     /**
      * Allows to override default master election algorithm.
-     * Default algorithm uses node with smallest Uuid as master.
+     * Default algorithm uses node with smallest member ID as master.
      *
      * @param masterElector custom MasterElector implementation
      */
@@ -313,9 +317,6 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
             logger.trace("[HA] Member removed handler");
             onMemberDown(membershipEvent.getMember(), convert(membershipEvent.getMembers()));
         }
-
-        @Override
-        public void memberAttributeChanged(MemberAttributeEvent memberAttributeEvent) { /* not used */ }
     }
 
     /**
@@ -366,19 +367,19 @@ public class HazelcastHighAvailabilityRegistry implements HighAvailabilityRegist
     /**
      * Default master elector implementation.
      */
-    private static class SmallestUuidMasterElector implements MasterElector<HazelcastClusterMember> {
+    private static class SmallestIdMasterElector implements MasterElector<HazelcastClusterMember> {
 
         @Override
         public HazelcastClusterMember elect(Collection<HazelcastClusterMember> members) {
-            SortedSet<HazelcastClusterMember> membersOrderedByUuid = new TreeSet<HazelcastClusterMember>(new Comparator<HazelcastClusterMember>() {
+            SortedSet<HazelcastClusterMember> membersOrderedById = new TreeSet<HazelcastClusterMember>(new Comparator<HazelcastClusterMember>() {
                 @Override
                 public int compare(HazelcastClusterMember o1, HazelcastClusterMember o2) {
                     return o1.getId().compareTo(o2.getId());
                 }
             });
-            membersOrderedByUuid.addAll(members);
+            membersOrderedById.addAll(members);
 
-            return membersOrderedByUuid.size() > 0 ? membersOrderedByUuid.first() : null;
+            return membersOrderedById.size() > 0 ? membersOrderedById.first() : null;
         }
     }
 }
